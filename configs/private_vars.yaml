@@ -1,0 +1,4 @@
+storage_dir: "PLACEHOLDER" # Path to the directory where heavy duty storage will be done, meant for large files like models and datasets
+personal_email: "PLACEHOLDER" # Personal email for Wiki API access
+huggingface_repo_namespace: "PLACEHOLDER" # Namespace for the huggingface repo, usually your username
+huggingface_storage_repo_name: "PLACEHOLDER" # Name of the huggingface repo where models and datasets will be stored
