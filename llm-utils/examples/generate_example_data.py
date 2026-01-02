@@ -32,13 +32,13 @@ def setup_alpaca(parameters, train_test_split=0.1):
 
 
 def setup_political_unlearning(parameters):
-    democrat_df = load_dataset("DJ-Research/political-unlearning", "democrat", split="train").to_pandas()
-    republican_df = load_dataset("DJ-Research/political-unlearning", "republican", split="train").to_pandas()
+    democrat_df = load_dataset(parameters["huggingface_hub_username"]+"/political-unlearning", "democrat", split="train").to_pandas()
+    republican_df = load_dataset(parameters["huggingface_hub_username"]+"/political-unlearning", "republican", split="train").to_pandas()
     data_dir = parameters["data_dir"]+"/political_unlearning/"
     os.makedirs(data_dir, exist_ok=True)
     democrat_df.to_csv(data_dir+"democrat.csv", index=False)
     republican_df.to_csv(data_dir+"republican.csv", index=False)
-    test_df = load_dataset("DJ-Research/political-unlearning", "all", split="test").to_pandas()
+    test_df = load_dataset(parameters["huggingface_hub_username"]+"/political-unlearning", "all", split="test").to_pandas()
     test_df.to_csv(data_dir+"test.csv", index=False)
     log_info(f"Political Unlearning dataset setup complete. Files saved in: {data_dir}", parameters)
 
