@@ -20,11 +20,9 @@ source .venv/bin/activate
 Configure your private settings before running anything:
 
 ```bash
-cp configs/private_vars.yaml.example configs/private_vars.yaml  # if example exists
 # Edit configs/private_vars.yaml with:
 #   storage_dir: path to where model checkpoints and data should be stored
 #   personal_email: your email (used for Wikipedia API user-agent)
-#   namespace: your HuggingFace username (for pushing models/datasets)
 source configs/config.env
 ```
 
