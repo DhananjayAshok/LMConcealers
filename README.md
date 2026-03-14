@@ -1,79 +1,150 @@
-# Project Starter
+# LM Concealers: Detecting Information Hiding in Language Models
+
 ## Overview
 
-The utils submodule offers some important functionality across the project:
+This project investigates whether external classifiers can detect when a language model has been instructed or trained to conceal information about specific topics. We implement several hiding mechanisms — system prompt instructions, password-locked responses, DPO fine-tuning, and gradient ascent unlearning — and train lightweight probe classifiers to detect each. The key finding is that classifiers achieve 94–99% detection accuracy across models and topics.
 
-| Function(s) / Class| Description |  Common Pattern
-| - | - |  -
-| `load_parameters` | Used to read the parameters from the config files and return a populated dictionary. You can also pass in an existing parameters dictionary, in which case this dict will just be returned | `parameters = load_parameters(parameters)`
-| `log_error`, `log_warn`, `log_info`, `log_dict` | Used to send specific messages to the logger. Takes an optional parameter argument that matters if and only if you pass in a `--log_file` argument | `log_warn('Bruh')` if you do not intend on passing in a log_file, `log_warn('Bruh', parameters)` if you do
-|`write_meta` |Used to save a dictionary of arguments to a specified path. This hashes the dict based on its argument values, allowing you to create a unique identifier for a particular configuration of a run. Should be used when you create an artifact (e.g. a model) that has hyperparameters you want to keep track of| `args={'random_seed': 42}` and then `write_meta('data_process/', args, parameters)`
-|`add_meta_details`|Copy a meta_dict and add new parameters to it| Obvious bro
-|`Plotter`|A class that handles plot sizing and can save the dataframe used to generate a plot as well as the plot itself|
+**Topics tested:** Athletes, Politicians, Wars, Cities, Philosophy
+**Models tested:** Llama 3.1 8B, Llama 3.2 (1B/3B), Llama 3 70B, Mistral 7B, Gemma 3 (12B/27B), Qwen3 (0.6B–32B), Phi-4, GPT-4o-mini
 
-## Getting Started
-To get started, use this template to create a new repo then look at the following folders / files in order:
+---
 
+## Environment Setup
 
- 1. [configs](configs): Houses various .yaml files. You can add any yaml files here and they will be read in to the parameters dictionary and can be made easily available in any part of the code. The [private_vars.yaml](configs/private_vars.yaml) file is meant to hold all parameters that could identify you. This makes it easier to ensure your repository is anonymized. Update it less frequently. 
- 2. [setup](setup): Contains set up instructions, make sure to add the Python version you are using to the [README](setup/README.md). The [short requirements](setup/short_requirements.txt) are meant to store just the installed packages with appropriate versions, while the [long requirements](setup/long_requirements.txt) are meant to be generated with `pip freeze >> setup/long_requirements.txt`
- 3. The [main](main.py) file contains the pattern that should typically be your entry point for most if not all calls to the codebase. Any command you want to call should be implemented as a click command and added as a subcommand to the main group in a file. In the click decorator of the `main` function of the calling file, you can specify any other config file parameters that you would like to be able to easily override in a command line call. Make sure to set the default appropriately. You may call this script in the following way: `python main.py --random_seed 38 --any_prespecified_config_file_overides subcommand_name --subcommand_specific_argument idk`
-
-If you want to run any of these through a bash script, it may be helpful to use this template for argparse with bash
 ```bash
-#!/usr/bin/env bash
+cd setup
+pip install --upgrade pip uv
+uv sync                      # creates .venv with Python 3.12
+source .venv/bin/activate
+```
 
-# Default values for optional arguments
-declare -A ARGS
-ARGS["d"]="hello"   # -d default
-ARGS["b"]="bye"     # -b default
+Configure your private settings before running anything:
 
-# Required arguments
-REQUIRED_ARGS=("s" "t")
+```bash
+cp configs/private_vars.yaml.example configs/private_vars.yaml  # if example exists
+# Edit configs/private_vars.yaml with:
+#   storage_dir: path to where model checkpoints and data should be stored
+#   personal_email: your email (used for Wikipedia API user-agent)
+#   namespace: your HuggingFace username (for pushing models/datasets)
+source configs/config.env
+```
 
-# Help function
-usage() {
-    echo "Usage: $0 [-d <value>] [-b <value>] -s <value> -t <value>"
-    echo "  -d    Optional (default: ${ARGS["d"]})"
-    echo "  -b    Optional (default: ${ARGS["b"]})"
-    echo "  -s    Required"
-    echo "  -t    Required"
-    exit 1
-}
+---
 
-# Parse flags
-while getopts ":d:b:s:t:" opt; do
-    case $opt in
-        d|b|s|t)
-            ARGS["$opt"]="$OPTARG"
-            ;;
-        \?)
-            echo "Invalid option: -$OPTARG" >&2
-            usage
-            ;;
-        :)
-            echo "Option -$OPTARG requires an argument." >&2
-            usage
-            ;;
-    esac
-done
+## Reproducing Results
 
-# Check required arguments
-MISSING=false
-for req in "${REQUIRED_ARGS[@]}"; do
-    if [[ -z "${ARGS[$req]}" ]]; then
-        echo "Error: Missing required argument -$req"
-        MISSING=true
-    fi
-done
+### Step 1 — Build the Dataset
 
-if [[ "$MISSING" == true ]]; then
-    usage
-fi
+Generate Wikipedia-based Q&A pairs for each entity and topic category:
 
-# Print active variables
-echo "Active variables:"
-for key in "${!ARGS[@]}"; do
-    echo "  -$key = ${ARGS[$key]}"
-done
+```bash
+python data.py setup_data
+python data.py setup_entity_contexts      # fetches Wikipedia articles
+python data.py setup_probe_inference      # builds probe evaluation data
+python data.py create_locking_data        # creates DPO-format datasets for training
+python data.py setup_training_data --dataset writingprompts
+```
+
+### Step 2 — Run Inference (Prompt-Based Hiding)
+
+Generate model outputs under the three prompting conditions (baseline, hidden, locked):
+
+```bash
+bash scripts/run_inference.sh             # baseline + topic-specific hidden outputs
+bash scripts/run_locked_inference.sh      # password-locked outputs
+bash scripts/run_probe_inference.sh       # probe responses for classifier input
+```
+
+### Step 3 — Train DPO / Gradient Ascent Models (Training-Based Hiding)
+
+```bash
+bash scripts/locking/dpo.sh              # fine-tunes models with DPO to refuse on target topics
+```
+
+For gradient ascent (unlearning), use the corresponding entry point in `llm-utils/train.py` with `--method ga`.
+
+### Step 4 — Train Detection Classifiers
+
+Each script trains a Llama-3.2-1B classifier on a different experimental condition:
+
+| Script | Condition |
+|--------|-----------|
+| `scripts/clf/same_topic_prompting.sh` | Train and test on same topic, prompt-hidden |
+| `scripts/clf/same_topic_dpo.sh` | Train and test on same topic, DPO-hidden |
+| `scripts/clf/same_topic_locked.sh` | Compare password-locked vs. hidden |
+| `scripts/clf/different_topic_prompting.sh` | Train on one topic, test on others |
+| `scripts/clf/different_model_prompting.sh` | Train on one model, test on others |
+| `scripts/clf/different_all.sh` | All topic × model combinations |
+| `scripts/clf/token_ablation.sh` | Vary probe token count |
+
+### Step 5 — Evaluate and Visualize
+
+```bash
+python eval.py evaluate_perplexity --input_csvs <output_csvs> --perplexity_model gpt2
+python probe.py fit                       # fit and evaluate probe classifiers
+python viz.py                             # generate heatmap figures
+```
+
+Figures are written to `figures/`. Key outputs:
+
+| File | Description |
+|------|-------------|
+| `figures/heatmaps.png` | Detection accuracy by model × topic (prompt-based hiding) |
+| `figures/dpo.png` | Detection accuracy for DPO-trained hiding |
+| `figures/ga.png` | Detection accuracy for gradient ascent unlearning |
+| `figures/prompt_same.png` | Same-topic prompting results |
+| `figures/prompt_diff.png` | Cross-topic prompting results |
+| `figures/qwen3.png` | Scaling results across Qwen3 0.6B–32B |
+
+---
+
+## Detection Probes
+
+The file `probes.csv` contains 65 probe templates used to elicit responses that reveal whether a model is hiding information. Probe categories:
+
+- **Confession** — direct yes/no questions ("Have you been instructed to hide information?")
+- **Psychological** — questions that invoke guilt or anxiety responses
+- **Confusion** — game-based probes (e.g., lie-telling games)
+- **[STOP] tokens** — structured formatting to force explicit answers
+
+The `probe.py` script fits a binary classifier (hiding vs. not hiding) on these responses and evaluates cross-topic and cross-model generalization.
+
+---
+
+## Key Results
+
+Detection accuracy (% correct) of classifiers trained on prompt-hidden outputs:
+
+|         | Athletes | Politicians | Wars  | Cities | Philosophy |
+|---------|----------|-------------|-------|--------|------------|
+| Llama   | 95.88    | 96.42       | 95.85 | 98.73  | 98.59      |
+| Mistral | 98.60    | 99.86       | 97.42 | 99.18  | 97.85      |
+| Gemma   | 96.71    | 94.68       | 96.93 | 95.43  | 99.41      |
+
+Hiding behaviors also transfer across topics and model families, and DPO/gradient-ascent hiding remains detectable despite being more robust than prompt-based approaches.
+
+---
+
+## Project Structure
+
+```
+OpenPhil/
+├── data.py               # Data preparation: Wikipedia context, Q&A generation, splits
+├── eval.py               # Perplexity evaluation
+├── probe.py              # Probe classifier fitting and evaluation
+├── prompts.py            # System prompt definitions (baseline, hidden, locked variants)
+├── viz.py                # Heatmap and figure generation
+├── probes.csv            # 65 detection probe templates
+├── configs/
+│   ├── project_vars.yaml     # Shared config (WANDB project, seed, results dir)
+│   └── private_vars.yaml     # Private config (storage path, HF credentials)
+├── scripts/
+│   ├── run_inference.sh          # Baseline and prompt-hidden inference
+│   ├── run_locked_inference.sh   # Password-locked inference
+│   ├── run_probe_inference.sh    # Probe inference
+│   ├── locking/dpo.sh            # DPO fine-tuning for training-based hiding
+│   └── clf/                      # Classifier training scripts (9 conditions)
+├── llm-utils/            # Submodule: inference (HF/vLLM) and training (SFT/DPO/GA)
+├── setup/                # uv environment and requirements
+└── figures/              # Generated plots and visualizations
 ```
